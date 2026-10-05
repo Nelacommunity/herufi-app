@@ -1,56 +1,49 @@
-# Welcome to your Expo app 👋
+# Herufi — mobile app
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+React Native (Expo SDK 57 + expo-router) shopping app for **Herufi**: buy direct from China, delivered to Tanzania.
+It uses the same Supabase backend as the website (`../herufi`), but it is for shoppers only. **The admin panel is deliberately not included.**
 
-## Get started
+## Features
+- Home, shop (filters, sort and infinite scroll), categories, search with suggestions
+- Product page with a swipeable, zoomable image gallery, variants, reviews and Q&A
+- Bag with shipping options (sea freight is free and applied automatically; air cargo and express air are priced by weight)
+- Five-step checkout (contact, address, shipping, payment, review) that calls the `place_order` RPC
+- Wishlist, recently viewed, orders with tracking timeline, saved addresses and cards, profile with avatar upload
+- Email/password sign-in, magic link and 6-digit code; English/Kiswahili; light/dark/system theme
+- Guest bag and wishlist merge into the account on sign-in
 
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
+## Setup
 ```bash
-npm run reset-project
+npm install
+cp .env.example .env   # fill in your Supabase URL + anon key
+npx expo start
+```
+Only the **public anon key** goes in `.env`. Never put the service-role key in the app: every `EXPO_PUBLIC_*` value is bundled into the client.
+
+### Supabase
+1. Apply the website's migrations (`../herufi/supabase/migrations`) and run `supabase/seed.sql` so prices are in TSh.
+2. Under **Auth → URL Configuration → Redirect URLs**, add `herufi://auth/callback`. For Expo Go during development, also add the `exp://…/--/auth/callback` URL that Expo prints.
+
+## Running
+- `npm run android` / `npm run ios`: run on a device or emulator
+- `npm run web`: run in the browser
+- `npm run typecheck` / `npm run lint`
+
+The app uses native modules (expo-sqlite, expo-image-picker, reanimated). If Expo Go doesn't match SDK 57, make a development build:
+```bash
+npx expo run:android      # or run:ios (macOS)
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## Release builds (EAS)
+```bash
+npm i -g eas-cli
+eas login
+eas build:configure
+eas secret:create --name EXPO_PUBLIC_SUPABASE_URL --value ...       # plus the anon key
+eas build -p android      # or -p ios
+```
+Bundle ID / package: `tz.co.herufi.app`. Scheme: `herufi`.
 
-### Other setup steps
-
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## Notes
+- Payments (M-Pesa, Tigo Pesa, Airtel Money and cards) are demo only. Cards store only the brand, last 4 digits and expiry.
+- Prices, stock, shipping and coupons are all computed in the database (`quote_order` / `place_order`). The client never decides the totals.

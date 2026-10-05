@@ -1,18 +1,24 @@
 {
   "expo": {
-    "name": "herufi-app",
-    "slug": "herufi-app",
+    "name": "Herufi",
+    "slug": "herufi",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "herufiapp",
+    "scheme": "herufi",
     "userInterfaceStyle": "automatic",
+    "description": "Buy direct from China, delivered to Tanzania. Free sea shipping, pay with M-Pesa or card.",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "bundleIdentifier": "tz.co.herufi.app",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Herufi uses your photos so you can set a profile picture."
+      }
     },
     "android": {
+      "package": "tz.co.herufi.app",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#FAFAF8",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -20,7 +26,7 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "output": "static",
+      "output": "single",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
@@ -28,10 +34,17 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#FAFAF8",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 120,
+          "dark": { "backgroundColor": "#0E0E0D", "image": "./assets/images/splash-icon-dark.png" }
         }
+      ],
+      "expo-sqlite",
+      "expo-localization",
+      [
+        "expo-image-picker",
+        { "photosPermission": "Herufi uses your photos so you can set a profile picture." }
       ]
     ],
     "experiments": {
