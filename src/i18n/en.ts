@@ -394,6 +394,8 @@ const en = {
       waitingBody: "We sent a payment prompt to {phone}. Enter your PIN to approve it. This updates automatically.",
       failed: "The payment wasn't completed. You have not been charged.",
       timeout: "We haven't received confirmation yet. If you approved the payment, your order will update shortly; check My orders.",
+      cardNote: "You'll be taken to a secure Snippe page to enter your card details. We never see or store your card number.",
+      cardWaiting: "Complete the card payment, then return to the app. This updates automatically.",
       retry: "Try payment again",
     },
     mobileMoney: "Mobile money",

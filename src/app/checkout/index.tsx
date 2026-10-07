@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { Button, Chip, EmptyState, Input, Sheet, Text } from '@/components/ui';
@@ -10,14 +11,14 @@ import { ShippingOptions } from '@/components/shop/shipping-options';
 import { useQuote } from '@/components/shop/use-quote';
 import { useI18n } from '@/i18n';
 import { fmt } from '@/i18n/config';
-import { cardBrand, COUPON_KEY, isTzMobile, luhn, MOBILE_MONEY, TZ_REGIONS } from '@/lib/constants';
+import { COUPON_KEY, isTzMobile, MOBILE_MONEY, TZ_REGIONS } from '@/lib/constants';
 import { formatPrice } from '@/lib/format';
 import { getPaymentStatus, startPayment } from '@/lib/payments';
 import { quoteFor, resolveMethod } from '@/lib/shipping';
 import { readJSON, writeJSON } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
 import { useAsync } from '@/lib/use-async';
-import type { Address, PaymentMethod } from '@/lib/types';
+import type { Address } from '@/lib/types';
 import { useStore } from '@/providers/store';
 import { radius, useTheme } from '@/theme';
 
@@ -39,12 +40,9 @@ export default function Checkout() {
   const { activeLines, subtotal, user, delivery, setDelivery, applyQuote, clearCart } = store;
 
   const saved = useAsync(async () => {
-    if (!user) return { addresses: [] as Address[], cards: [] as PaymentMethod[] };
-    const [ad, pm] = await Promise.all([
-      supabase.from('addresses').select('*').order('is_default', { ascending: false }),
-      supabase.from('payment_methods').select('*').order('is_default', { ascending: false }),
-    ]);
-    return { addresses: (ad.data ?? []) as Address[], cards: (pm.data ?? []) as PaymentMethod[] };
+    if (!user) return { addresses: [] as Address[] };
+    const ad = await supabase.from('addresses').select('*').order('is_default', { ascending: false });
+    return { addresses: (ad.data ?? []) as Address[] };
   }, [user?.id]);
 
   const [step, setStep] = useState<Step>(user?.email ? 2 : 1);
@@ -55,8 +53,6 @@ export default function Checkout() {
   const [payKind, setPayKind] = useState<'mobile' | 'card'>('mobile');
   const [provider, setProvider] = useState<(typeof MOBILE_MONEY)[number]>('M-Pesa');
   const [mobile, setMobile] = useState('');
-  const [cardChoice, setCardId] = useState<string | 'new' | null>(null);
-  const [card, setCard] = useState({ number: '', exp: '', cvc: '', name: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [coupon, setCoupon] = useState(() => readJSON<string>(COUPON_KEY, ''));
   const [placing, setPlacing] = useState(false);
@@ -68,7 +64,6 @@ export default function Checkout() {
 
   // Default to the shopper's default saved address/card until they pick something else.
   const addressId = addressChoice ?? (saved.data?.addresses.find((x) => x.is_default) ?? saved.data?.addresses[0])?.id ?? 'new';
-  const cardId = cardChoice ?? (saved.data?.cards.find((x) => x.is_default) ?? saved.data?.cards[0])?.id ?? 'new';
 
   const { quote: base, loading } = useQuote(activeLines, coupon);
   useEffect(() => { if (base) applyQuote(base.lines); }, [base, applyQuote]);
@@ -102,10 +97,8 @@ export default function Checkout() {
   const shipTo = addressId !== 'new' && savedAddress
     ? { full_name: savedAddress.full_name, line1: savedAddress.line1, line2: savedAddress.line2 ?? '', city: savedAddress.city, region: savedAddress.region ?? '', postal_code: savedAddress.postal_code ?? '', country: 'TZ', phone: savedAddress.phone ?? '' }
     : { ...address, country: 'TZ' };
-  const savedCard = saved.data?.cards.find((x) => x.id === cardId);
-  const payment = payKind === 'mobile'
-    ? { brand: provider, last4: mobile.replace(/\D/g, '').slice(-4) }
-    : cardId !== 'new' && savedCard ? { brand: savedCard.brand, last4: savedCard.last4 } : { brand: cardBrand(card.number), last4: card.number.replace(/\D/g, '').slice(-4) };
+  // Only a display label is stored on the order; card details are entered on Snippe's hosted page, never in the app.
+  const payment = payKind === 'mobile' ? { brand: provider, last4: mobile.replace(/\D/g, '').slice(-4) } : { brand: 'Card', last4: '' };
 
   const next = (s: Step) => { setErrors({}); setStep(s); };
 
@@ -120,13 +113,7 @@ export default function Checkout() {
     }
     if (s === 4) {
       if (payKind === 'mobile' && !isTzMobile(mobile)) e.mobile = c.errors.mobile;
-      if (payKind === 'card' && cardId === 'new') {
-        const [m, y] = card.exp.split('/').map((v) => Number(v.trim()));
-        if (!luhn(card.number)) e.number = c.errors.cardNumber;
-        if (!m || m > 12 || !y || new Date(2000 + (y % 100), m) <= new Date()) e.exp = c.errors.expiry;
-        if (!/^\d{3,4}$/.test(card.cvc)) e.cvc = c.errors.cvc;
-        if (card.name.trim().length < 2) e.name = c.errors.cardName;
-      }
+      if (payKind === 'card' && !isTzMobile(shipTo.phone)) e.phone = c.errors.phone;
     }
     setErrors(e);
     return !Object.keys(e).length;
@@ -167,18 +154,20 @@ export default function Checkout() {
       const order = data as { order_number: string; total: number };
       number = order.order_number;
       setOrderNumber(number);
-      if (payKind === 'card') {
-        setPlacing(false);
-        router.replace({ pathname: '/checkout/success', params: { order: number, total: String(order.total) } });
-        return;
-      }
     }
 
-    // Mobile money: the backend creates the Snippe payment and the customer gets a prompt on their phone.
+    // The backend creates the Snippe payment: a phone prompt for mobile money, or a hosted page for cards.
     attempt.current += 1;
-    const res = await startPayment({ orderNumber: number, email: email.trim(), kind: 'mobile', phone: mobile, attemptId: newAttemptId(attempt.current) });
+    const res = await startPayment({
+      orderNumber: number, email: email.trim(), kind: payKind,
+      phone: payKind === 'mobile' ? mobile : shipTo.phone, attemptId: newAttemptId(attempt.current),
+    });
+    if (!res.ok) { setPlacing(false); setSubmitError(res.error); return; }
+    if (payKind === 'card') {
+      if (!res.paymentUrl) { setPlacing(false); setSubmitError(c.errors.generic); return; }
+      await WebBrowser.openBrowserAsync(res.paymentUrl);
+    }
     setPlacing(false);
-    if (!res.ok) { setSubmitError(res.error); return; }
     setWaiting(true);
   }
 
@@ -186,7 +175,7 @@ export default function Checkout() {
     { n: 1, title: c.steps.contact, summary: email },
     { n: 2, title: c.steps.address, summary: shipTo.full_name ? `${shipTo.full_name}, ${shipTo.line1}, ${shipTo.city}` : undefined },
     { n: 3, title: c.steps.delivery, summary: t.shipping.methods[method]?.label },
-    { n: 4, title: c.steps.payment, summary: payment.last4 ? fmt(c.endingIn, payment) : undefined },
+    { n: 4, title: c.steps.payment, summary: payKind === 'card' ? c.card : payment.last4 ? fmt(c.endingIn, payment) : undefined },
     { n: 5, title: c.steps.review },
   ];
 
@@ -255,7 +244,6 @@ export default function Checkout() {
 
               {open && s.n === 4 && (
                 <View style={styles.body}>
-                  {payKind === 'card' && <View style={[styles.demo, { backgroundColor: colors.accentSoft }]}><Feather name="lock" size={14} color={colors.accent} /><Text variant="small" tone="accent" style={{ flex: 1 }}>{c.demoNote}</Text></View>}
                   <View style={[styles.segment, { backgroundColor: colors.surface2 }]}>
                     {(['mobile', 'card'] as const).map((k) => (
                       <Pressable key={k} onPress={() => { setPayKind(k); setErrors({}); }} style={[styles.segBtn, payKind === k && { backgroundColor: colors.surface }]}>
@@ -274,25 +262,8 @@ export default function Checkout() {
                     </View>
                   ) : (
                     <View style={{ gap: 12 }}>
-                      {(saved.data?.cards.length ?? 0) > 0 && (
-                        <View style={{ gap: 8 }}>
-                          {saved.data!.cards.map((cd) => <Option key={cd.id} selected={cardId === cd.id} onPress={() => setCardId(cd.id)} title={`${cd.brand} •••• ${cd.last4}`} text={fmt(c.expires, { date: `${String(cd.exp_month).padStart(2, '0')}/${String(cd.exp_year).slice(-2)}` })} />)}
-                          <Option selected={cardId === 'new'} onPress={() => setCardId('new')} title={c.useNewCard} />
-                        </View>
-                      )}
-                      {cardId === 'new' && (
-                        <>
-                          <Input label={c.cardNumber} value={card.number} keyboardType="number-pad" placeholder="4242 4242 4242 4242" error={errors.number}
-                            onChangeText={(v) => setCard({ ...card, number: v.replace(/\D/g, '').slice(0, 19).replace(/(.{4})/g, '$1 ').trim() })} />
-                          <View style={{ flexDirection: 'row', gap: 10 }}>
-                            <Input containerStyle={{ flex: 1 }} label={c.expiry} value={card.exp} keyboardType="number-pad" placeholder="MM / YY" error={errors.exp}
-                              onChangeText={(v) => { const d = v.replace(/\D/g, '').slice(0, 4); setCard({ ...card, exp: d.length > 2 ? `${d.slice(0, 2)} / ${d.slice(2)}` : d }); }} />
-                            <Input containerStyle={{ flex: 1 }} label={c.cvc} value={card.cvc} keyboardType="number-pad" placeholder="CVC" error={errors.cvc} secureTextEntry
-                              onChangeText={(v) => setCard({ ...card, cvc: v.replace(/\D/g, '').slice(0, 4) })} />
-                          </View>
-                          <Input label={c.nameOnCard} value={card.name} onChangeText={(v) => setCard({ ...card, name: v })} error={errors.name} />
-                        </>
-                      )}
+                      <View style={[styles.demo, { backgroundColor: colors.surface2 }]}><Feather name="credit-card" size={14} color={colors.muted} /><Text variant="small" tone="muted" style={{ flex: 1 }}>{c.payment.cardNote}</Text></View>
+                      {errors.phone ? <Text variant="small" tone="sale">{errors.phone}</Text> : null}
                     </View>
                   )}
                   <Button title={c.reviewOrder} onPress={() => validate(4) && next(5)} />
@@ -314,7 +285,7 @@ export default function Checkout() {
                   <OrderSummary quote={quote} loading={loading} fallbackSubtotal={subtotal} coupon={coupon}
                     onCoupon={(v) => { setCoupon(v); writeJSON(COUPON_KEY, v || null); }} shippingLabel={`${t.summary.shipping} (${t.shipping.methods[method]?.label ?? method})`} />
                   {submitError && <View style={[styles.demo, { backgroundColor: colors.saleSoft }]}><Text tone="sale">{submitError}</Text></View>}
-                  {waiting && <View style={[styles.demo, { backgroundColor: colors.accentSoft }]}><Feather name="loader" size={14} color={colors.accent} /><Text variant="small" tone="accent" style={{ flex: 1 }}>{c.payment.waitingTitle}: {fmt(c.payment.waitingBody, { phone: mobile })}</Text></View>}
+                  {waiting && <View style={[styles.demo, { backgroundColor: colors.accentSoft }]}><Feather name="loader" size={14} color={colors.accent} /><Text variant="small" tone="accent" style={{ flex: 1 }}>{c.payment.waitingTitle}: {payKind === 'mobile' ? fmt(c.payment.waitingBody, { phone: mobile }) : c.payment.cardWaiting}</Text></View>}
                   <Button size="lg" icon="lock" title={`${orderNumber ? c.payment.retry : c.placeOrder}${quote ? ` · ${formatPrice(quote.total)}` : ''}`} loading={placing || waiting} disabled={!quote || loading || !quote.shipping_available} onPress={placeOrder} />
                 </View>
               )}

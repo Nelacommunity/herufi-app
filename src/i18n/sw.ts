@@ -394,6 +394,8 @@ const sw: Dictionary = {
       waitingBody: "Tumetuma ombi la malipo kwa {phone}. Weka PIN yako kuidhinisha. Hii husasishwa yenyewe.",
       failed: "Malipo hayakukamilika. Hujakatwa pesa.",
       timeout: "Bado hatujapokea uthibitisho. Ikiwa umeidhinisha malipo, oda yako itasasishwa hivi punde; angalia Oda zangu.",
+      cardNote: "Utapelekwa kwenye ukurasa salama wa Snippe kuweka taarifa za kadi yako. Hatuoni wala kuhifadhi namba ya kadi.",
+      cardWaiting: "Kamilisha malipo ya kadi, kisha rudi kwenye programu. Hii husasishwa yenyewe.",
       retry: "Jaribu kulipa tena",
     },
     mobileMoney: "Pesa kwa simu",
