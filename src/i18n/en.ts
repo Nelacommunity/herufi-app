@@ -389,6 +389,13 @@ const en = {
     } as Record<string, { label: string; eta: string }>,
     continuePayment: "Continue to payment",
     demoNote: "Demo store: no real payment is taken.",
+    payment: {
+      waitingTitle: "Confirm on your phone",
+      waitingBody: "We sent a payment prompt to {phone}. Enter your PIN to approve it. This updates automatically.",
+      failed: "The payment wasn't completed. You have not been charged.",
+      timeout: "We haven't received confirmation yet. If you approved the payment, your order will update shortly; check My orders.",
+      retry: "Try payment again",
+    },
     mobileMoney: "Mobile money",
     card: "Card",
     provider: "Provider",

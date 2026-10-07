@@ -389,6 +389,13 @@ const sw: Dictionary = {
     },
     continuePayment: "Endelea kwenye malipo",
     demoNote: "Duka la majaribio: hakuna malipo halisi yanayokatwa.",
+    payment: {
+      waitingTitle: "Thibitisha kwenye simu yako",
+      waitingBody: "Tumetuma ombi la malipo kwa {phone}. Weka PIN yako kuidhinisha. Hii husasishwa yenyewe.",
+      failed: "Malipo hayakukamilika. Hujakatwa pesa.",
+      timeout: "Bado hatujapokea uthibitisho. Ikiwa umeidhinisha malipo, oda yako itasasishwa hivi punde; angalia Oda zangu.",
+      retry: "Jaribu kulipa tena",
+    },
     mobileMoney: "Pesa kwa simu",
     card: "Kadi",
     provider: "Mtoa huduma",

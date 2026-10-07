@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
@@ -12,6 +12,7 @@ import { useI18n } from '@/i18n';
 import { fmt } from '@/i18n/config';
 import { cardBrand, COUPON_KEY, isTzMobile, luhn, MOBILE_MONEY, TZ_REGIONS } from '@/lib/constants';
 import { formatPrice } from '@/lib/format';
+import { getPaymentStatus, startPayment } from '@/lib/payments';
 import { quoteFor, resolveMethod } from '@/lib/shipping';
 import { readJSON, writeJSON } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
@@ -23,6 +24,11 @@ import { radius, useTheme } from '@/theme';
 type Step = 1 | 2 | 3 | 4 | 5;
 type AddressForm = { full_name: string; phone: string; line1: string; line2: string; city: string; region: string; postal_code: string };
 const EMPTY: AddressForm = { full_name: '', phone: '', line1: '', line2: '', city: '', region: 'Dar es Salaam', postal_code: '' };
+
+/** ≤10 chars; the server builds Snippe's ≤30-char idempotency key from it. */
+function newAttemptId(n: number) {
+  return `${Date.now().toString(36)}${n}`.slice(-10);
+}
 
 export default function Checkout() {
   const { colors } = useTheme();
@@ -55,6 +61,10 @@ export default function Checkout() {
   const [coupon, setCoupon] = useState(() => readJSON<string>(COUPON_KEY, ''));
   const [placing, setPlacing] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Mobile money: set once the order exists so retrying never places a second order.
+  const [orderNumber, setOrderNumber] = useState<string | null>(null);
+  const [waiting, setWaiting] = useState(false);
+  const attempt = useRef(0);
 
   // Default to the shopper's default saved address/card until they pick something else.
   const addressId = addressChoice ?? (saved.data?.addresses.find((x) => x.is_default) ?? saved.data?.addresses[0])?.id ?? 'new';
@@ -65,6 +75,24 @@ export default function Checkout() {
   const options = base?.shipping_options ?? [];
   const method = resolveMethod(options, delivery);
   const quote = base ? quoteFor(base, method) : null;
+
+  // Poll the order (only the signed Snippe webhook marks it paid) until it settles or we give up.
+  useEffect(() => {
+    if (!waiting || !orderNumber) return;
+    let stopped = false;
+    const started = Date.now();
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      const status = await getPaymentStatus(orderNumber, email.trim());
+      if (stopped) return;
+      if (status === 'paid') { router.replace({ pathname: '/checkout/success', params: { order: orderNumber, total: String(quote?.total ?? '') } }); return; }
+      if (status === 'failed') { setWaiting(false); setSubmitError(c.payment.failed); return; }
+      if (Date.now() - started > 120_000) { setWaiting(false); setSubmitError(c.payment.timeout); return; }
+      timer = setTimeout(tick, 3000);
+    };
+    timer = setTimeout(tick, 3000);
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [waiting, orderNumber]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!activeLines.length) {
     return <EmptyState icon="shopping-bag" title={t.cart.empty} description={c.emptyDesc} action={<Button title={t.common.continueShopping} onPress={() => router.replace('/shop')} />} />;
@@ -107,35 +135,51 @@ export default function Checkout() {
   async function placeOrder() {
     setPlacing(true);
     setSubmitError(null);
-    const { data, error } = await supabase.rpc('place_order', {
-      items: activeLines.map((l) => ({ product_id: l.productId, variant_id: l.variantId, quantity: l.quantity })),
-      email: email.trim(),
-      shipping_address: shipTo,
-      delivery_method: method,
-      payment,
-      coupon_code: quote?.coupon_code ?? null,
-    });
+    let number = orderNumber;
+    if (!number) {
+      const { data, error } = await supabase.rpc('place_order', {
+        items: activeLines.map((l) => ({ product_id: l.productId, variant_id: l.variantId, quantity: l.quantity })),
+        email: email.trim(),
+        shipping_address: shipTo,
+        delivery_method: method,
+        payment,
+        coupon_code: quote?.coupon_code ?? null,
+      });
+      if (error) {
+        setPlacing(false);
+        const m = error.message;
+        const stock = m.match(/OUT_OF_STOCK:(\d+):(.+)$/);
+        setSubmitError(stock ? fmt(c.errors.outOfStock, { n: stock[1], name: stock[2] })
+          : m.includes('DELIVERY_UNAVAILABLE') ? c.errors.deliveryUnavailable
+          : m.includes('INVALID_ADDRESS') ? c.errors.address
+          : m.includes('EMPTY_BAG') ? c.errors.emptyBag
+          : m.includes('SUSPENDED') ? c.errors.suspended
+          : m.startsWith('COUPON:') ? t.summary.coupon.invalid : c.errors.generic);
+        return;
+      }
+      // Save the new address for signed-in shoppers (best effort).
+      if (user && addressId === 'new') {
+        const { count } = await supabase.from('addresses').select('id', { count: 'exact', head: true });
+        await supabase.from('addresses').insert({ ...shipTo, line2: shipTo.line2 || null, postal_code: shipTo.postal_code || null, user_id: user.id, label: 'Home', is_default: !count });
+      }
+      writeJSON(COUPON_KEY, null);
+      clearCart();
+      const order = data as { order_number: string; total: number };
+      number = order.order_number;
+      setOrderNumber(number);
+      if (payKind === 'card') {
+        setPlacing(false);
+        router.replace({ pathname: '/checkout/success', params: { order: number, total: String(order.total) } });
+        return;
+      }
+    }
+
+    // Mobile money: the backend creates the Snippe payment and the customer gets a prompt on their phone.
+    attempt.current += 1;
+    const res = await startPayment({ orderNumber: number, email: email.trim(), kind: 'mobile', phone: mobile, attemptId: newAttemptId(attempt.current) });
     setPlacing(false);
-    if (error) {
-      const m = error.message;
-      const stock = m.match(/OUT_OF_STOCK:(\d+):(.+)$/);
-      setSubmitError(stock ? fmt(c.errors.outOfStock, { n: stock[1], name: stock[2] })
-        : m.includes('DELIVERY_UNAVAILABLE') ? c.errors.deliveryUnavailable
-        : m.includes('INVALID_ADDRESS') ? c.errors.address
-        : m.includes('EMPTY_BAG') ? c.errors.emptyBag
-        : m.includes('SUSPENDED') ? c.errors.suspended
-        : m.startsWith('COUPON:') ? t.summary.coupon.invalid : c.errors.generic);
-      return;
-    }
-    // Save the new address for signed-in shoppers (best effort).
-    if (user && addressId === 'new') {
-      const { count } = await supabase.from('addresses').select('id', { count: 'exact', head: true });
-      await supabase.from('addresses').insert({ ...shipTo, line2: shipTo.line2 || null, postal_code: shipTo.postal_code || null, user_id: user.id, label: 'Home', is_default: !count });
-    }
-    writeJSON(COUPON_KEY, null);
-    clearCart();
-    const order = data as { order_number: string; total: number };
-    router.replace({ pathname: '/checkout/success', params: { order: order.order_number, total: String(order.total) } });
+    if (!res.ok) { setSubmitError(res.error); return; }
+    setWaiting(true);
   }
 
   const steps: { n: Step; title: string; summary?: string }[] = [
@@ -211,7 +255,7 @@ export default function Checkout() {
 
               {open && s.n === 4 && (
                 <View style={styles.body}>
-                  <View style={[styles.demo, { backgroundColor: colors.accentSoft }]}><Feather name="lock" size={14} color={colors.accent} /><Text variant="small" tone="accent" style={{ flex: 1 }}>{c.demoNote}</Text></View>
+                  {payKind === 'card' && <View style={[styles.demo, { backgroundColor: colors.accentSoft }]}><Feather name="lock" size={14} color={colors.accent} /><Text variant="small" tone="accent" style={{ flex: 1 }}>{c.demoNote}</Text></View>}
                   <View style={[styles.segment, { backgroundColor: colors.surface2 }]}>
                     {(['mobile', 'card'] as const).map((k) => (
                       <Pressable key={k} onPress={() => { setPayKind(k); setErrors({}); }} style={[styles.segBtn, payKind === k && { backgroundColor: colors.surface }]}>
@@ -270,7 +314,8 @@ export default function Checkout() {
                   <OrderSummary quote={quote} loading={loading} fallbackSubtotal={subtotal} coupon={coupon}
                     onCoupon={(v) => { setCoupon(v); writeJSON(COUPON_KEY, v || null); }} shippingLabel={`${t.summary.shipping} (${t.shipping.methods[method]?.label ?? method})`} />
                   {submitError && <View style={[styles.demo, { backgroundColor: colors.saleSoft }]}><Text tone="sale">{submitError}</Text></View>}
-                  <Button size="lg" icon="lock" title={`${c.placeOrder}${quote ? ` · ${formatPrice(quote.total)}` : ''}`} loading={placing} disabled={!quote || loading || !quote.shipping_available} onPress={placeOrder} />
+                  {waiting && <View style={[styles.demo, { backgroundColor: colors.accentSoft }]}><Feather name="loader" size={14} color={colors.accent} /><Text variant="small" tone="accent" style={{ flex: 1 }}>{c.payment.waitingTitle}: {fmt(c.payment.waitingBody, { phone: mobile })}</Text></View>}
+                  <Button size="lg" icon="lock" title={`${orderNumber ? c.payment.retry : c.placeOrder}${quote ? ` · ${formatPrice(quote.total)}` : ''}`} loading={placing || waiting} disabled={!quote || loading || !quote.shipping_available} onPress={placeOrder} />
                 </View>
               )}
             </View>
