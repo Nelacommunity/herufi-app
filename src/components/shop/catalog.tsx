@@ -152,7 +152,10 @@ export function Catalog({ fixedCategory, initial, header, searchLabel }: { fixed
             {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} style={{ width: cardW, aspectRatio: 4 / 6.2, borderRadius: 16 }} />)}
           </View>
         ) : error ? <ErrorState onRetry={() => setRetry((n) => n + 1)} /> : (
-          <EmptyState icon="search" title={filters.q ? c.noResults.replace('{q}', filters.q) : c.noMatch} description={filters.q ? c.noResultsDesc : c.noMatchDesc}
+          <EmptyState icon={filters.q || activeCount > 0 ? 'search' : 'package'}
+            // No search and no filters means the catalog (or this category) is simply empty: don't blame the filters.
+            title={filters.q ? c.noResults.replace('{q}', filters.q) : activeCount > 0 ? c.noMatch : a.emptyCatalog.title}
+            description={filters.q ? c.noResultsDesc : activeCount > 0 ? c.noMatchDesc : a.emptyCatalog.body}
             action={activeCount > 0 ? <Button title={c.clearSearch} onPress={() => setFilters({ sort: filters.sort, categoryId: fixedCategory?.id, q: filters.q })} /> : undefined} />
         )}
         ListFooterComponent={loadingMore ? <ActivityIndicator style={{ marginTop: 12 }} color={colors.muted} /> : null}

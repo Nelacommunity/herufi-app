@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
+import { Image } from 'expo-image';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, FontAwesome } from '@expo/vector-icons';
 import { Badge, Button, Chip, Divider, EmptyState, ErrorState, Input, Price, QuantityStepper, Sheet, Skeleton, Stars, Text } from '@/components/ui';
-import { Gallery } from '@/components/product/gallery';
+import { Gallery, type GalleryHandle } from '@/components/product/gallery';
 import { ProductRail } from '@/components/product/product-rail';
 import { ShippingOptions } from '@/components/shop/shipping-options';
 import { useI18n } from '@/i18n';
@@ -50,6 +51,8 @@ export default function ProductScreen() {
 
   useEffect(() => { if (product) store.trackView(product.id); }, [product?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const gallery = useRef<GalleryHandle>(null);
+  const scroller = useRef<ScrollView>(null);
   // A product with a single option has it pre-selected.
   const selectedId = variantId ?? (product?.variants.length === 1 ? product.variants[0].id : null);
   const variant: ProductVariant | null = product?.variants.find((v) => v.id === selectedId) ?? null;
@@ -108,8 +111,8 @@ export default function ProductScreen() {
           </View>
         ),
       }} />
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 + insets.bottom }}>
-        <Gallery images={product.images} name={product.name} badge={!available ? <Badge tone="glass" label={p.soldOut} /> : product.discount_percent > 0 ? <Badge tone="sale" label={`−${product.discount_percent}%`} /> : undefined} />
+      <ScrollView ref={scroller} contentContainerStyle={{ paddingBottom: 120 + insets.bottom }}>
+        <Gallery ref={gallery} images={product.images} name={product.name} badge={!available ? <Badge tone="glass" label={p.soldOut} /> : product.discount_percent > 0 ? <Badge tone="sale" label={`−${product.discount_percent}%`} /> : undefined} />
 
         <View style={{ padding: space.lg, gap: 14 }}>
           <View style={{ gap: 6 }}>
@@ -141,8 +144,13 @@ export default function ProductScreen() {
                   const sw = optionName === 'Color' ? SWATCHES[v.value.toLowerCase()] : undefined;
                   return (
                     <Chip key={v.id} label={`${v.value}${v.additional_price > 0 ? ` +${Math.round(v.additional_price / 1000)}K` : ''}`} selected={selectedId === v.id} disabled={v.stock_quantity <= 0}
-                      onPress={() => { setVariantId(v.id); setError(null); }}
-                      icon={sw ? <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: sw, borderWidth: 1, borderColor: 'rgba(0,0,0,0.15)' }} /> : undefined} />
+                      onPress={() => {
+                        setVariantId(v.id); setError(null);
+                        // Show the variant's photo, scrolling up so the change is visible.
+                        if (v.image_url) { gallery.current?.show(v.image_url); scroller.current?.scrollTo({ y: 0, animated: true }); }
+                      }}
+                      icon={v.image_url ? <Image source={v.image_url} style={{ width: 22, height: 22, borderRadius: 11, marginLeft: -6 }} contentFit="cover" />
+                        : sw ? <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: sw, borderWidth: 1, borderColor: 'rgba(0,0,0,0.15)' }} /> : undefined} />
                   );
                 })}
               </View>

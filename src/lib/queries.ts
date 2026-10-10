@@ -136,7 +136,14 @@ export async function getProductBySlug(slug: string): Promise<Product | null> {
   // 42703: shipping columns missing (database before migration 0006) — fall back to defaults.
   if (error?.code === '42703') ({ data, error } = await supabase.from('products').select(PRODUCT_SELECT.replace(/, weight_kg.*$/, '')).eq('slug', slug).eq('is_active', true).maybeSingle());
   if (error) throw error;
-  return data ? toProduct(data) : null;
+  if (!data) return null;
+  const product = toProduct(data);
+  if (!product.variants.length) return product;
+  // Variant photos come from migration 0011; fetched separately so older databases keep working.
+  const { data: photos, error: pErr } = await supabase.from('product_variants').select('id, image_url').eq('product_id', product.id);
+  if (pErr || !photos) return product;
+  const map = new Map((photos as { id: string; image_url: string | null }[]).map((v) => [v.id, v.image_url]));
+  return { ...product, variants: product.variants.map((v) => ({ ...v, image_url: map.get(v.id) ?? null })) };
 }
 
 export async function getRelated(product: Product, limit = 8) {

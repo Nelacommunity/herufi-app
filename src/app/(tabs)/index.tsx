@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { Feather } from '@expo/vector-icons';
-import { ErrorState, SectionHeader, Skeleton, Text } from '@/components/ui';
+import { Button, EmptyState, ErrorState, SectionHeader, Skeleton, Text } from '@/components/ui';
 import { ProductRail } from '@/components/product/product-rail';
 import { useI18n } from '@/i18n';
 import { fmt } from '@/i18n/config';
@@ -90,21 +90,20 @@ export default function Home() {
       >
         {/* Promo cards */}
         <FlatList
-          data={a.home.promos}
+          data={a.home.promos.map((item, i) => ({ item, tone: PROMO_TONES[i] })).filter((_, i) => i !== 1 || best > 0)}
           keyExtractor={(_, i) => String(i)}
           horizontal
           showsHorizontalScrollIndicator={false}
           snapToInterval={promoW + 12}
           decelerationRate="fast"
           contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingTop: 6 }}
-          renderItem={({ item, index }) => {
-            const tone = PROMO_TONES[index];
+          renderItem={({ item: { item, tone } }) => {
             const fg = tone.fg === 'white' ? '#fff' : colors.background;
             const ctaText = tone.fg === 'white' ? colors[tone.bg] : colors.foreground;
             return (
               <Pressable onPress={tone.go} style={({ pressed }) => [styles.promo, { width: promoW, backgroundColor: colors[tone.bg], opacity: pressed ? 0.92 : 1 }]}>
                 <Feather name={tone.icon} size={120} color={fg} style={styles.promoIcon} />
-                <Text style={{ color: fg, fontSize: 22, lineHeight: 28, fontWeight: '700', letterSpacing: -0.4 }}>{fmt(item.title, { n: best || 25 })}</Text>
+                <Text style={{ color: fg, fontSize: 22, lineHeight: 28, fontWeight: '700', letterSpacing: -0.4 }}>{fmt(item.title, { n: best })}</Text>
                 <Text style={{ color: fg, opacity: 0.8, marginTop: 4 }}>{item.body}</Text>
                 <View style={[styles.promoCta, { backgroundColor: fg }]}>
                   <Text variant="small" style={{ fontWeight: '700', color: ctaText }}>{item.cta}</Text>
@@ -135,8 +134,12 @@ export default function Home() {
           </ScrollView>
         </View>
 
+        {d && !d.trending.length && !d.fresh.length && !d.best.length && !d.top.length && !d.deals.length ? (
+          <EmptyState icon="package" title={a.emptyCatalog.title} description={a.emptyCatalog.body}
+            action={<Button title={t.common.shopNow} variant="secondary" onPress={() => router.navigate('/shop')} />} />
+        ) : (
         <Animated.View entering={FadeIn.duration(300)}>
-          <Section title={h.trendingTitle} eyebrow={h.trendingEyebrow} onAll={() => router.push({ pathname: '/shop', params: { sort: 'popular' } })} seeAll={a.seeAll}>
+          <Section empty={!!d && !d?.trending?.length} title={h.trendingTitle} eyebrow={h.trendingEyebrow} onAll={() => router.push({ pathname: '/shop', params: { sort: 'popular' } })} seeAll={a.seeAll}>
             <ProductRail products={d?.trending} loading={!d} />
           </Section>
 
@@ -146,29 +149,33 @@ export default function Home() {
             </Section>
           )}
 
-          <Section title={h.newTitle} eyebrow={h.newEyebrow} onAll={() => router.push({ pathname: '/shop', params: { sort: 'newest' } })} seeAll={a.seeAll}>
+          <Section empty={!!d && !d?.fresh?.length} title={h.newTitle} eyebrow={h.newEyebrow} onAll={() => router.push({ pathname: '/shop', params: { sort: 'newest' } })} seeAll={a.seeAll}>
             <ProductRail products={d?.fresh} loading={!d} />
           </Section>
 
-          <Section title={h.bestTitle} eyebrow={h.bestEyebrow} onAll={() => router.push({ pathname: '/shop', params: { sort: 'popular' } })} seeAll={a.seeAll}>
+          <Section empty={!!d && !d?.best?.length} title={h.bestTitle} eyebrow={h.bestEyebrow} onAll={() => router.push({ pathname: '/shop', params: { sort: 'popular' } })} seeAll={a.seeAll}>
             <ProductRail products={d?.best} loading={!d} />
           </Section>
 
           <Section
+            empty={!!d && !(recs.data ?? d.top).length}
             title={recs.data && firstName ? fmt(h.recommendedTitleName, { name: firstName }) : h.recommendedTitle}
             eyebrow={recs.data ? h.pickedForYou : h.favourites}
           >
             <ProductRail products={recs.data ?? d?.top} loading={!d} />
           </Section>
         </Animated.View>
+        )}
       </ScrollView>
     </View>
   );
 }
 
-function Section({ title, eyebrow, eyebrowTone, onAll, seeAll, children }: {
-  title: string; eyebrow?: string; eyebrowTone?: 'sale'; onAll?: () => void; seeAll?: string; children: React.ReactNode;
+function Section({ title, eyebrow, eyebrowTone, onAll, seeAll, children, empty }: {
+  title: string; eyebrow?: string; eyebrowTone?: 'sale'; onAll?: () => void; seeAll?: string; children: React.ReactNode; empty?: boolean;
 }) {
+  // Loaded but nothing to show: skip the heading too, instead of a title over a blank space.
+  if (empty) return null;
   return (
     <View style={{ paddingTop: space.xxl }}>
       <View style={{ paddingHorizontal: space.lg, flexDirection: 'row', alignItems: 'flex-end', gap: 12, marginBottom: space.md }}>

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useImperativeHandle, useRef, useState, type Ref } from 'react';
 import { FlatList, Modal, Pressable, StatusBar, StyleSheet, useWindowDimensions, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { Image } from 'expo-image';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -12,7 +12,9 @@ import type { ProductImage } from '@/lib/types';
 import { useTheme } from '@/theme';
 
 /** Swipeable product carousel with dots, counter and thumbnails; tap opens a full-screen zoomable viewer. */
-export function Gallery({ images, name, badge }: { images: ProductImage[]; name: string; badge?: React.ReactNode }) {
+export type GalleryHandle = { show: (imageUrl: string) => void };
+
+export function Gallery({ images, name, badge, ref }: { images: ProductImage[]; name: string; badge?: React.ReactNode; ref?: Ref<GalleryHandle> }) {
   const { width } = useWindowDimensions();
   const { colors } = useTheme();
   const { t } = useI18n();
@@ -27,6 +29,10 @@ export function Gallery({ images, name, badge }: { images: ProductImage[]; name:
     if (i !== index) setIndex(i);
   };
   const goTo = (i: number) => { list.current?.scrollToIndex({ index: i, animated: true }); setIndex(i); };
+  // Lets the product page jump to a variant's photo (the cover stays first in the list).
+  useImperativeHandle(ref, () => ({
+    show: (url: string) => { const i = images.findIndex((img) => img.image_url === url); if (i >= 0) goTo(i); },
+  }));
 
   if (!images.length) return <View style={{ width, height, backgroundColor: colors.surface2 }} />;
 

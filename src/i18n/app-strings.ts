@@ -41,6 +41,7 @@ const en = {
   addReview: 'Write a review',
   questions: 'Questions',
   noResults: 'No products found',
+  emptyCatalog: { title: 'New products are on the way', body: 'Our team is adding items from the factories. Check back soon, or browse the categories.' },
   welcome: {
     skip: 'Skip',
     next: 'Next',
@@ -107,6 +108,7 @@ const sw: typeof en = {
   addReview: 'Andika maoni',
   questions: 'Maswali',
   noResults: 'Hakuna bidhaa zilizopatikana',
+  emptyCatalog: { title: 'Bidhaa mpya zinakuja', body: 'Timu yetu inaongeza bidhaa kutoka viwandani. Rudi hivi karibuni, au angalia makundi.' },
   welcome: {
     skip: 'Ruka',
     next: 'Endelea',

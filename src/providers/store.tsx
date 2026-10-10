@@ -98,7 +98,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         .order('created_at'),
       supabase.from('wishlist_items').select('product_id').order('created_at', { ascending: false }),
     ]);
-    if (!cart.error) commitLines((cart.data ?? []).map(rowToLine).filter((l): l is CartLine => Boolean(l)));
+    if (!cart.error) {
+      let lines = (cart.data ?? []).map(rowToLine).filter((l): l is CartLine => Boolean(l));
+      // Show the chosen variant's photo (migration 0011). Fetched separately so older databases still load the bag.
+      const variantIds = lines.map((l) => l.variantId).filter((id): id is string => Boolean(id));
+      if (variantIds.length) {
+        const photos = await supabase.from('product_variants').select('id, image_url').in('id', variantIds);
+        if (!photos.error) {
+          const map = new Map(((photos.data ?? []) as { id: string; image_url: string | null }[]).map((v) => [v.id, v.image_url]));
+          lines = lines.map((l) => (l.variantId && map.get(l.variantId) ? { ...l, image: map.get(l.variantId)! } : l));
+        }
+      }
+      commitLines(lines);
+    }
     if (!wish.error) commitWish((wish.data ?? []).map((w) => w.product_id as string));
   }, [commitLines, commitWish]);
 
@@ -157,7 +169,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const extra = variant?.additional_price ?? 0;
     const line: CartLine = {
       productId: product.id, variantId: variant?.id ?? null, quantity: qty, savedForLater: false,
-      name: product.name, slug: product.slug, brand: product.brand, image: product.images[0]?.image_url ?? null,
+      name: product.name, slug: product.slug, brand: product.brand, image: variant?.image_url || product.images[0]?.image_url || null,
       unitPrice: product.price + extra, compareAtPrice: product.compare_at_price ? product.compare_at_price + extra : null,
       variantLabel: variant ? `${variant.name}: ${variant.value}` : null, maxQuantity: max,
     };

@@ -271,6 +271,12 @@ export default function Checkout() {
                     onCoupon={(v) => { setCoupon(v); writeJSON(COUPON_KEY, v || null); }} shippingLabel={`${t.summary.shipping} (${t.shipping.methods[method]?.label ?? method})`} />
                   {submitError && <View style={[styles.demo, { backgroundColor: colors.saleSoft }]}><Text tone="sale">{submitError}</Text></View>}
                   <Button size="lg" icon="lock" title={`${c.placeOrder}${quote ? ` · ${formatPrice(quote.total)}` : ''}`} loading={placing} disabled={!quote || loading || !quote.shipping_available} onPress={placeOrder} />
+                  <Text variant="small" tone="subtle" style={{ textAlign: 'center' }}>
+                    {c.agree.split(/(\{terms\}|\{refunds\}|\{privacy\})/).map((part, i) => {
+                      const link = ({ '{terms}': ['terms', c.termsLink], '{refunds}': ['refunds', c.refundsLink], '{privacy}': ['privacy', c.privacyLink] } as Record<string, [string, string]>)[part];
+                      return link ? <Text key={i} variant="small" style={{ textDecorationLine: 'underline' }} onPress={() => router.push({ pathname: '/help/[topic]', params: { topic: link[0] } })}>{link[1]}</Text> : part;
+                    })}
+                  </Text>
                 </View>
               )}
             </View>
