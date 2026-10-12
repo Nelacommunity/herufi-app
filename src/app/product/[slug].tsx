@@ -11,11 +11,12 @@ import { ShippingOptions } from '@/components/shop/shipping-options';
 import { useI18n } from '@/i18n';
 import { fmt, plural } from '@/i18n/config';
 import { SITE } from '@/lib/constants';
-import { formatRelative } from '@/lib/format';
+import { formatPrice, formatRelative } from '@/lib/format';
 import { getProductBySlug, getQuestions, getRelated, getReviews, getShippingOptions, isInStock } from '@/lib/queries';
 import { resolveMethod } from '@/lib/shipping';
 import { supabase } from '@/lib/supabase';
 import { useAsync } from '@/lib/use-async';
+import { findVariant, imageFor, initialSelection, optionGroups, photoForValue, photoOption, selectValue, valueState, type Selection } from '@/lib/variant-options';
 import type { ProductVariant, ShippingOption } from '@/lib/types';
 import { useStore } from '@/providers/store';
 import { useToast } from '@/providers/toast';
@@ -35,7 +36,8 @@ export default function ProductScreen() {
   const insets = useSafeAreaInsets();
   const toast = useToast();
   const store = useStore();
-  const [variantId, setVariantId] = useState<string | null>(null);
+  // Options such as Color and Size are chosen separately; together they pick one variant (combination).
+  const [selState, setSel] = useState<{ key?: string; sel: Selection }>({ sel: {} });
   const [qty, setQty] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [options, setOptions] = useState<{ key: string; list: ShippingOption[] } | null>(null);
@@ -54,8 +56,13 @@ export default function ProductScreen() {
   const gallery = useRef<GalleryHandle>(null);
   const scroller = useRef<ScrollView>(null);
   // A product with a single option has it pre-selected.
-  const selectedId = variantId ?? (product?.variants.length === 1 ? product.variants[0].id : null);
-  const variant: ProductVariant | null = product?.variants.find((v) => v.id === selectedId) ?? null;
+  // Reset to the product's starting selection whenever a different product loads.
+  if (product && selState.key !== product.id) setSel({ key: product.id, sel: initialSelection(product.variants) });
+  const sel = selState.key === product?.id ? selState.sel : {};
+  const groups = product ? optionGroups(product.variants) : [];
+  const photoGroup = product ? photoOption(product.variants) : null;
+  const found = product ? findVariant(product.variants, sel) : null;
+  const variant: ProductVariant | null = found ? product?.variants.find((v) => v.id === found.id) ?? null : null;
   const extra = variant?.additional_price ?? 0;
   const unit = (product?.price ?? 0) + extra;
   const stock = !product ? 0 : variant ? variant.stock_quantity : product.variants.length ? Math.max(...product.variants.map((v) => v.stock_quantity)) : product.stock_quantity;
@@ -86,14 +93,26 @@ export default function ProductScreen() {
     );
   }
 
-  const optionName = product.variants[0]?.name;
-  const optionLabel = optionName ? t.optionNames[optionName] ?? optionName : '';
+  const label = (name: string) => t.optionNames[name] ?? name;
+  function choose(name: string, value: string) {
+    if (!product) return;
+    const next = selectValue(product.variants, sel, name, value);
+    setSel({ key: product.id, sel: next });
+    setError(null);
+    // Show the photo for what's chosen so far (e.g. the colour), scrolling up so the change is visible.
+    const img = imageFor(product.variants, next);
+    if (img) { gallery.current?.show(img); scroller.current?.scrollTo({ y: 0, animated: true }); }
+  }
   const seaFree = options?.list.some((o) => o.method === 'sea' && o.available && o.free);
   const stockNote = !available ? [p.stockSoldOut, colors.sale] : variant && variant.stock_quantity === 0 ? [fmt(p.variantSoldOut, { value: variant.value }), colors.sale]
     : stock > 0 && stock <= 5 ? [fmt(p.lowStock, { n: stock }), colors.warning] : [p.inStock, colors.success];
 
   const add = (buyNow: boolean) => {
-    if (product.variants.length && !variant) { setError(fmt(p.pleaseSelect, { option: optionLabel.toLowerCase() })); return; }
+    if (product.variants.length && !variant) {
+      const missing = groups.find((g) => !sel[g.name]);
+      setError(fmt(p.pleaseSelect, { option: label(missing?.name ?? groups[0]?.name ?? '').toLowerCase() }));
+      return;
+    }
     setError(null);
     const ok = store.addToCart(product, variant, quantity, { silent: buyNow });
     if (ok && buyNow) router.push('/checkout');
@@ -136,24 +155,36 @@ export default function ProductScreen() {
           <Text variant="small" tone="muted">{p.taxNote} {p.payNote}</Text>
           <Text tone="muted">{product.description.split('. ').slice(0, 2).join('. ')}{product.description.split('. ').length > 2 ? '.' : ''}</Text>
 
-          {product.variants.length > 0 && (
-            <View style={{ gap: 10 }}>
-              <Text variant="label">{optionLabel}: <Text tone="muted" style={{ fontWeight: '400' }}>{variant?.value ?? p.selectAnOption}</Text></Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                {product.variants.map((v) => {
-                  const sw = optionName === 'Color' ? SWATCHES[v.value.toLowerCase()] : undefined;
-                  return (
-                    <Chip key={v.id} label={`${v.value}${v.additional_price > 0 ? ` +${Math.round(v.additional_price / 1000)}K` : ''}`} selected={selectedId === v.id} disabled={v.stock_quantity <= 0}
-                      onPress={() => {
-                        setVariantId(v.id); setError(null);
-                        // Show the variant's photo, scrolling up so the change is visible.
-                        if (v.image_url) { gallery.current?.show(v.image_url); scroller.current?.scrollTo({ y: 0, animated: true }); }
-                      }}
-                      icon={v.image_url ? <Image source={v.image_url} style={{ width: 22, height: 22, borderRadius: 11, marginLeft: -6 }} contentFit="cover" />
-                        : sw ? <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: sw, borderWidth: 1, borderColor: 'rgba(0,0,0,0.15)' }} /> : undefined} />
-                  );
-                })}
-              </View>
+          {groups.length > 0 && (
+            <View style={{ gap: 16 }}>
+              {groups.map((g) => {
+                const others = Object.entries(sel).filter(([n]) => n !== g.name).map(([, v]) => v).join(', ');
+                return (
+                  <View key={g.name} style={{ gap: 10 }}>
+                    <Text variant="label">{label(g.name)}: <Text tone="muted" style={{ fontWeight: '400' }}>{sel[g.name] ?? p.selectAnOption}</Text></Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                      {g.values.map((value) => {
+                        const state = valueState(product.variants, sel, g.name, value);
+                        const sw = g.name === 'Color' ? SWATCHES[value.toLowerCase()] : undefined;
+                        // A photo for this value (e.g. the colour) from any variant that has one.
+                        const thumb = g.name === photoGroup ? photoForValue(product.variants, g.name, value) : null;
+                        // A single-option variant can carry an extra price; show it on its chip.
+                        const single = groups.length === 1 ? product.variants.find((v) => v.value === value) : undefined;
+                        return (
+                          <Chip key={value} label={`${value}${single && single.additional_price > 0 ? ` +${Math.round(single.additional_price / 1000)}K` : ''}`}
+                            selected={sel[g.name] === value} muted={state === 'available' ? undefined : state}
+                            accessibilityHint={state === 'unavailable' && others ? fmt(p.comboUnavailable, { selection: others }) : state === 'soldout' ? fmt(p.variantSoldOut, { value }) : undefined}
+                            onPress={() => choose(g.name, value)}
+                            icon={thumb ? <Image source={thumb} style={{ width: 22, height: 22, borderRadius: 11, marginLeft: -6 }} contentFit="cover" />
+                              : sw ? <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: sw, borderWidth: 1, borderColor: 'rgba(0,0,0,0.15)' }} /> : undefined} />
+                        );
+                      })}
+                    </View>
+                  </View>
+                );
+              })}
+              {variant && variant.additional_price > 0 && groups.length > 1 && <Text variant="small" tone="muted">{variant.value}: +{formatPrice(variant.additional_price)}</Text>}
+              {variant && variant.stock_quantity <= 0 && <Text tone="sale" style={{ fontWeight: '600' }}>{fmt(p.variantSoldOut, { value: variant.value })}</Text>}
               {error && <Text tone="sale" style={{ fontWeight: '600' }}>{error}</Text>}
             </View>
           )}

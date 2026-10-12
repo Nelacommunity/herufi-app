@@ -105,13 +105,18 @@ export const Input = forwardRef<TextInput, TextInputProps & { label?: string; er
   },
 );
 
-export function Chip({ label, selected, onPress, icon, disabled }: { label: string; selected?: boolean; onPress?: () => void; icon?: ReactNode; disabled?: boolean }) {
+/** `muted`: still tappable but shown as sold out ("soldout", struck through) or not in the current combination ("unavailable"). */
+export function Chip({ label, selected, onPress, icon, disabled, muted, accessibilityHint }: {
+  label: string; selected?: boolean; onPress?: () => void; icon?: ReactNode; disabled?: boolean; muted?: 'soldout' | 'unavailable'; accessibilityHint?: string;
+}) {
   const { colors } = useTheme();
+  const dim = !selected && (disabled || muted);
   return (
-    <Pressable onPress={onPress} disabled={disabled} accessibilityRole="button" accessibilityState={{ selected, disabled }}
-      style={[styles.chip, { borderColor: selected ? colors.foreground : colors.borderStrong, backgroundColor: selected ? colors.foreground : colors.surface, opacity: disabled ? 0.4 : 1 }]}>
+    <Pressable onPress={onPress} disabled={disabled} accessibilityRole="button" accessibilityState={{ selected, disabled }} accessibilityHint={accessibilityHint}
+      style={[styles.chip, { borderColor: selected ? colors.foreground : colors.borderStrong, backgroundColor: selected ? colors.foreground : colors.surface, opacity: dim ? (muted === 'unavailable' ? 0.4 : 0.55) : 1 },
+        !selected && muted && { borderStyle: 'dashed' }]}>
       {icon}
-      <RNText style={{ color: selected ? colors.background : colors.foreground, fontSize: 14, fontWeight: '500', textDecorationLine: disabled ? 'line-through' : 'none' }}>{label}</RNText>
+      <RNText style={{ color: selected ? colors.background : colors.foreground, fontSize: 14, fontWeight: '500', textDecorationLine: !selected && (disabled || muted === 'soldout') ? 'line-through' : 'none' }}>{label}</RNText>
     </Pressable>
   );
 }
