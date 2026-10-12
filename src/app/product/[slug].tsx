@@ -16,7 +16,7 @@ import { getProductBySlug, getQuestions, getRelated, getReviews, getShippingOpti
 import { resolveMethod } from '@/lib/shipping';
 import { supabase } from '@/lib/supabase';
 import { useAsync } from '@/lib/use-async';
-import { findVariant, imageFor, initialSelection, optionGroups, photoForValue, photoOption, selectValue, valueState, type Selection } from '@/lib/variant-options';
+import { findVariant, imageFor, initialSelection, optionGroups, photoForValue, photoOption, selectValue, valueExtra, valueState, type Selection } from '@/lib/variant-options';
 import type { ProductVariant, ShippingOption } from '@/lib/types';
 import { useStore } from '@/providers/store';
 import { useToast } from '@/providers/toast';
@@ -168,10 +168,10 @@ export default function ProductScreen() {
                         const sw = g.name === 'Color' ? SWATCHES[value.toLowerCase()] : undefined;
                         // A photo for this value (e.g. the colour) from any variant that has one.
                         const thumb = g.name === photoGroup ? photoForValue(product.variants, g.name, value) : null;
-                        // A single-option variant can carry an extra price; show it on its chip.
-                        const single = groups.length === 1 ? product.variants.find((v) => v.value === value) : undefined;
+                        // Extra price shared by every variant with this value (e.g. size XL +2,000), shown on its chip.
+                        const extraPrice = valueExtra(product.variants, g.name, value);
                         return (
-                          <Chip key={value} label={`${value}${single && single.additional_price > 0 ? ` +${Math.round(single.additional_price / 1000)}K` : ''}`}
+                          <Chip key={value} label={`${value}${extraPrice != null && extraPrice > 0 ? ` +${formatPrice(extraPrice)}` : ''}`}
                             selected={sel[g.name] === value} muted={state === 'available' ? undefined : state}
                             accessibilityHint={state === 'unavailable' && others ? fmt(p.comboUnavailable, { selection: others }) : state === 'soldout' ? fmt(p.variantSoldOut, { value }) : undefined}
                             onPress={() => choose(g.name, value)}
@@ -183,7 +183,7 @@ export default function ProductScreen() {
                   </View>
                 );
               })}
-              {variant && variant.additional_price > 0 && groups.length > 1 && <Text variant="small" tone="muted">{variant.value}: +{formatPrice(variant.additional_price)}</Text>}
+              {variant && variant.additional_price > 0 && groups.every((g) => valueExtra(product.variants, g.name, sel[g.name]) == null) && <Text variant="small" tone="muted">{variant.value}: +{formatPrice(variant.additional_price)}</Text>}
               {variant && variant.stock_quantity <= 0 && <Text tone="sale" style={{ fontWeight: '600' }}>{fmt(p.variantSoldOut, { value: variant.value })}</Text>}
               {error && <Text tone="sale" style={{ fontWeight: '600' }}>{error}</Text>}
             </View>
